@@ -11,7 +11,6 @@ behavior as the Python app, SwiftUI interface.
 ## Build and run
 
 ```bash
-cd MAC_REWRITE
 swift build
 swift run BITTyping
 
