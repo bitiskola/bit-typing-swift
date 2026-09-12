@@ -28,7 +28,7 @@ struct AboutView: View {
                         .clipShape(RoundedRectangle(cornerRadius: 22))
                     Text("BIT Typing")
                         .font(.system(size: 26, weight: .bold))
-                    Text("\(state.t("version")) 1.0.0")
+                    Text("\(state.t("version")) 2.0.0")
                         .font(.system(size: 14, weight: .bold))
                         .foregroundStyle(Theme.muted(scheme))
                     Text(state.t("about_description"))

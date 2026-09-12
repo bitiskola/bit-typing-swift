@@ -20,7 +20,7 @@ if [[ "$(uname -s)" != "Darwin" ]]; then
 fi
 
 APP_NAME="BIT Typing"
-APP_VERSION="${1:-1.0.0}"
+APP_VERSION="${1:-2.0.0}"
 SIGN_IDENTITY="${MACOS_SIGN_IDENTITY:--}"
 OUTPUT_DIR="$PROJECT_DIR/outputs"
 
