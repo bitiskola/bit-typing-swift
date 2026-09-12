@@ -5,7 +5,7 @@ behavior as the Python app, SwiftUI interface.
 
 ## Requirements
 
-- macOS 14+ to run (Liquid Glass details light up on macOS 26)
+- Apple Silicon (For x86 use the Rust version!) macOS 14+ to run (Liquid Glass details light up on macOS 26)
 - Swift 6 toolchain (Xcode 26 or Command Line Tools)
 
 ## Build and run
