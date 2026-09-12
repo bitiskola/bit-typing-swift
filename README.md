@@ -22,10 +22,10 @@ open "BIT Typing.app"
 swift run BITTyping --verify-engine
 ```
 
-## Installer disk image
+## Build app with Installer disk image
 
 ```bash
-./package-dmg.sh
+./build_dmg.sh
 ```
 
 Rebuilds the app, then produces `BIT Typing-1.0.0-macOS-arm64.dmg`:
