@@ -19,9 +19,40 @@ APP="BIT Typing.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 
-cp ".build/$CONFIG/BITTyping" "$APP/Contents/MacOS/"
+# Locate build products robustly: newer toolchains put them under
+# .build/<triple>/<config>/ with .build/<config> as a symlink, and the
+# triple varies (x86_64 vs arm64). Fail loudly instead of shipping an app
+# whose resource bundle is missing (that used to crash at launch via a
+# Bundle.module fatalError on any machine other than the build host).
+BIN_SRC=""
+for CAND in ".build/$CONFIG/BITTyping" .build/*/"$CONFIG"/BITTyping; do
+    if [[ -f "$CAND" ]]; then BIN_SRC="$CAND"; break; fi
+done
+if [[ -z "$BIN_SRC" ]]; then
+    echo "Error: BITTyping binary not found under .build/ for config '$CONFIG'." >&2
+    exit 1
+fi
+BUNDLE_SRC=""
+for CAND in ".build/$CONFIG/BITTyping_BITTyping.bundle" .build/*/"$CONFIG"/BITTyping_BITTyping.bundle; do
+    if [[ -d "$CAND" ]]; then BUNDLE_SRC="$CAND"; break; fi
+done
+if [[ -z "$BUNDLE_SRC" ]]; then
+    echo "Error: BITTyping_BITTyping.bundle not found under .build/ for config '$CONFIG'." >&2
+    exit 1
+fi
+
+cp "$BIN_SRC" "$APP/Contents/MacOS/"
 cp "Info.plist" "$APP/Contents/"
-cp -R ".build/$CONFIG/BITTyping_BITTyping.bundle" "$APP/Contents/Resources/"
+cp -R "$BUNDLE_SRC" "$APP/Contents/Resources/"
+# NOTE: the bundle must live ONLY in Contents/Resources. A second copy next
+# to the executable (Contents/MacOS/) breaks `codesign --deep` ("bundle
+# format unrecognized, invalid, or unsuitable"), so don't add one — the app
+# locates the Resources copy on its own.
+
+if [[ ! -d "$APP/Contents/Resources/BITTyping_BITTyping.bundle/courses" ]]; then
+    echo "Error: resource bundle copy failed — courses/ missing in $APP/Contents/Resources/." >&2
+    exit 1
+fi
 
 # Real Dock/Finder icon generated from the bundled favico.png.
 ICONSET="$(mktemp -d)/AppIcon.iconset"

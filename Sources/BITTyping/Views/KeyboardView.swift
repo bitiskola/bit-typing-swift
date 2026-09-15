@@ -10,9 +10,16 @@ import SwiftUI
 /// metal, not staggered approximations. The next expected key (letter,
 /// space, Tab, or Enter) fills with ink, mirroring `highlight_key()` in
 /// `main.py`.
-struct KeyboardView: View {
+struct KeyboardView: View, Equatable {
     var layout: KeyboardLayout
     var activeChar: String
+
+    // Manual implementation: GeometryReader content carries no other state.
+    // Skips the ~60-keycap rebuild on timer ticks that only change the
+    // toolbar metrics (paired with `.equatable()` at the call site).
+    nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.layout == rhs.layout && lhs.activeChar == rhs.activeChar
+    }
 
     /// Fixed board width in key units — the ANSI/ISO 15u standard.
     private let totalUnits = 15.0
@@ -39,6 +46,7 @@ struct KeyboardView: View {
                                 fontSize: spec.kind == .modifier
                                     ? metrics.modifierFont : metrics.fontSize
                             )
+                            .equatable()
                         }
                     }
                     .frame(width: boardWidth)
@@ -184,7 +192,7 @@ private struct KeySpec {
 
 /// Touch-typing finger (left/right share a tint — the classic 4-color
 /// tutor scheme — plus the thumb on the space bar).
-enum FingerZone {
+enum FingerZone: Equatable {
     case pinky
     case ring
     case middle
@@ -237,7 +245,7 @@ private func fingerZone(row: Int, column: Int, count: Int) -> FingerZone {
 /// `.key` shows a finger tint, `.space` stays neutral, `.modifier` uses
 /// the plain keycap surface. `isActive` (the next expected key) overrides
 /// the tint with the ink fill.
-private struct Keycap: View {
+private struct Keycap: View, Equatable {
     @Environment(\.colorScheme) private var scheme
     var label: String
     var kind: KeyKind
@@ -246,6 +254,13 @@ private struct Keycap: View {
     var width: Double
     var height: Double
     var fontSize: Double
+
+    // Manual implementation: the @Environment member must not participate.
+    nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.label == rhs.label && lhs.kind == rhs.kind && lhs.zone == rhs.zone
+            && lhs.isActive == rhs.isActive && lhs.width == rhs.width
+            && lhs.height == rhs.height && lhs.fontSize == rhs.fontSize
+    }
 
     init(
         _ label: String,
@@ -294,7 +309,7 @@ private struct Keycap: View {
 
 // MARK: - Keycap Kind
 
-enum KeyKind {
+enum KeyKind: Equatable {
     case key
     case space
     case modifier

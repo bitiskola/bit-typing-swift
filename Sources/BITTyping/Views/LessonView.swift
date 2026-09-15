@@ -111,6 +111,7 @@ struct LessonView: View {
     /// fullscreen; minimum keeps the default window layout stable.
     private var lessonText: some View {
         LessonTextView(text: state.session.text, states: state.session.states, activeIndex: state.session.index)
+            .equatable()
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .frame(minHeight: 170, maxHeight: .infinity)
             .layoutPriority(1)
@@ -120,6 +121,7 @@ struct LessonView: View {
     private var keyboardBlock: some View {
         VStack(spacing: 12) {
             KeyboardView(layout: state.keyboardLayout, activeChar: activeCharacter)
+                .equatable()
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             fingerLegend
         }

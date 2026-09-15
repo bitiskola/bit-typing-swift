@@ -168,7 +168,7 @@ struct LanguagePack: Codable, Sendable {
     }
 }
 
-struct KeyboardLayout: Codable, Sendable {
+struct KeyboardLayout: Codable, Sendable, Equatable {
     var name: String = ""
     var rows: [[String]] = []
     var spaceLabel: String = "SPACE"

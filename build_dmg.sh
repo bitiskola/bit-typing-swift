@@ -289,6 +289,14 @@ echo "  $OUTPUT_DMG"
 echo
 
 if [[ "$SIGN_IDENTITY" == "-" ]]; then
-    echo "The app is ad-hoc signed. For public distribution, set MACOS_SIGN_IDENTITY"
-    echo "and optionally MACOS_NOTARY_PROFILE before running this script."
+    echo "The app is ad-hoc signed. macOS Gatekeeper does not trust ad-hoc"
+    echo "signatures, so on any other Mac the app will be blocked on first launch"
+    echo "(\"damaged / cannot be verified\"), with no Open Anyway button — users must"
+    echo "strip the quarantine flag manually (xattr -cr \"BIT Typing.app\")."
+    echo "For normal double-click-to-open distribution:"
+    echo "  1. Join the Apple Developer Program and create a"
+    echo "     'Developer ID Application' certificate."
+    echo "  2. Store an app-specific password as a notarytool keychain profile, then:"
+    echo "       MACOS_SIGN_IDENTITY='Developer ID Application: Your Name (TEAMID)' \\"
+    echo "       MACOS_NOTARY_PROFILE=your-notary-profile ./build_dmg.sh"
 fi

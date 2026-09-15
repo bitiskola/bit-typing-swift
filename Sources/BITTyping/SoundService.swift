@@ -6,53 +6,75 @@ import Foundation
 /// Responsive click mixer: overlapping key/error sounds each play on their
 /// own player so rapid strokes never cut each other off — the same role as
 /// `ClickSoundMixer` in `main.py`. Also owns a soft metronome tick.
-final class SoundService: NSObject, @unchecked Sendable {
+final class SoundService: @unchecked Sendable {
 
     // MARK: - Internal
 
-    private var keyData: Data = Data()
-    private var errorData: Data = Data()
-    private var tickData: Data = Data()
-    private var players: [AVAudioPlayer] = []
+    // Fixed pools of pre-buffered players, round-robined per hit. The old
+    // code built a fresh `AVAudioPlayer(data:)` on the main thread for every
+    // keystroke (parse + AudioQueue setup per press), which lagged typing
+    // feedback on slower Macs. Prepared players make `play()` near-instant.
+    private var keyPlayers: [AVAudioPlayer] = []
+    private var errorPlayers: [AVAudioPlayer] = []
+    private var tickPlayer: AVAudioPlayer? = nil
+    private var keyCursor = 0
+    private var errorCursor = 0
     private let lock = NSLock()
+    private static let poolSize = 8
 
-    override init() {
-        super.init()
+    init() {
         AppSupport.ensureSeeded()
         ensureSoundFiles()
-        keyData = (try? Data(contentsOf: AppSupport.sounds.appendingPathComponent("key.wav"))) ?? Data()
-        errorData = (try? Data(contentsOf: AppSupport.sounds.appendingPathComponent("error.wav"))) ?? Data()
-        tickData = Self.sineWav(frequency: 880, duration: 0.03, volume: 0.08)
+        keyPlayers = Self.preparedPlayers(
+            url: AppSupport.sounds.appendingPathComponent("key.wav"), count: Self.poolSize)
+        errorPlayers = Self.preparedPlayers(
+            url: AppSupport.sounds.appendingPathComponent("error.wav"), count: Self.poolSize)
+        tickPlayer = try? AVAudioPlayer(data: Self.sineWav(frequency: 880, duration: 0.03, volume: 0.08))
+        tickPlayer?.prepareToPlay()
     }
 
     /// Play key (`correct`) or error feedback. Safe to call from any thread.
     func play(correct: Bool) {
-        let data = correct ? keyData : errorData
-        guard !data.isEmpty else { return }
-        play(data: data, volume: 1.0)
+        lock.lock()
+        defer { lock.unlock() }
+        if correct {
+            guard !keyPlayers.isEmpty else { return }
+            let player = keyPlayers[keyCursor]
+            keyCursor = (keyCursor + 1) % keyPlayers.count
+            player.volume = 1.0
+            player.currentTime = 0
+            player.play()
+        } else {
+            guard !errorPlayers.isEmpty else { return }
+            let player = errorPlayers[errorCursor]
+            errorCursor = (errorCursor + 1) % errorPlayers.count
+            player.volume = 1.0
+            player.currentTime = 0
+            player.play()
+        }
     }
 
     /// Soft metronome tick used while a timed lesson is running.
     func tick() {
-        play(data: tickData, volume: 0.6)
+        lock.lock()
+        defer { lock.unlock() }
+        guard let player = tickPlayer else { return }
+        player.volume = 0.6
+        player.currentTime = 0
+        player.play()
     }
 
     // MARK: - Private
 
-    private func play(data: Data, volume: Float) {
-        guard !data.isEmpty else { return }
-        do {
-            let player = try AVAudioPlayer(data: data)
-            player.volume = volume
-            player.delegate = self
-            lock.lock()
-            players.append(player)
-            // Cap polyphony; drop the oldest voice first.
-            if players.count > 32 { players.removeFirst() }
-            lock.unlock()
-            player.play()
-        } catch {
-            // Stay silent rather than interrupting typing.
+    /// Up to `count` players pre-buffered via `prepareToPlay`, so first and
+    /// later hits cost the same. Empty when the file is missing — the app
+    /// stays silent instead of interrupting typing.
+    private static func preparedPlayers(url: URL, count: Int) -> [AVAudioPlayer] {
+        guard let data = try? Data(contentsOf: url), !data.isEmpty else { return [] }
+        return (0..<count).compactMap { _ in
+            guard let player = try? AVAudioPlayer(data: data) else { return nil }
+            player.prepareToPlay()
+            return player
         }
     }
 
@@ -97,10 +119,3 @@ final class SoundService: NSObject, @unchecked Sendable {
     }
 }
 
-// MARK: - AVAudioPlayerDelegate
-
-extension SoundService: AVAudioPlayerDelegate {
-    nonisolated func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
-        // Player retention is best-effort; the 32-voice cap bounds growth.
-    }
-}

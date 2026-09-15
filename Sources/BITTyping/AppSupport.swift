@@ -5,6 +5,82 @@ import Foundation
 /// Writable per-user root: `~/Library/Application Support/BIT Typing`.
 /// Bundled defaults ship in the app package and are seeded here without
 /// overwriting user-edited files — mirroring `ensure_dirs()` in `main.py`.
+enum AppResources {
+    static let bundleFileName = "BITTyping_BITTyping.bundle"
+
+    /// Root directory directly containing `courses/`, `lang/`, `keyboards/`,
+    /// `sounds/` and `favico.png` — either the SwiftPM `.bundle` wrapper or a
+    /// flattened layout (e.g. `Contents/Resources` itself).
+    ///
+    /// Never traps: SwiftPM's generated `Bundle.module` calls `fatalError`
+    /// when its two hardcoded candidates miss (the `.app` layout
+    /// `Contents/Resources/*.bundle` is not one of them, and the absolute
+    /// build-tree fallback only exists on the machine that compiled the app),
+    /// which crashed every launch on other Macs. Every caller here gets an
+    /// optional and the app still starts with synthesized/empty defaults.
+    static func baseURL() -> URL? {
+        let manager = FileManager.default
+        var isDir: ObjCBool = false
+
+        // 1. SwiftPM `.bundle` directories in every plausible location.
+        var bundles: [URL] = []
+        if let resources = Bundle.main.resourceURL {
+            bundles.append(resources.appendingPathComponent(bundleFileName, isDirectory: true))
+        }
+        bundles.append(Bundle.main.bundleURL.appendingPathComponent(bundleFileName, isDirectory: true))
+        bundles.append(
+            Bundle.main.bundleURL.appendingPathComponent(
+                "Contents/Resources/\(bundleFileName)", isDirectory: true))
+        if let executableDir = Bundle.main.executableURL?.deletingLastPathComponent() {
+            bundles.append(executableDir.appendingPathComponent(bundleFileName, isDirectory: true))
+        }
+        for url in bundles {
+            if manager.fileExists(atPath: url.path, isDirectory: &isDir), isDir.boolValue {
+                return url
+            }
+        }
+
+        // 2. Flattened layouts: a directory directly holding the content.
+        var flats: [URL] = []
+        if let resources = Bundle.main.resourceURL { flats.append(resources) }
+        flats.append(Bundle.main.bundleURL.appendingPathComponent("Contents/Resources", isDirectory: true))
+        if let executableDir = Bundle.main.executableURL?.deletingLastPathComponent() {
+            flats.append(executableDir)
+        }
+        flats.append(Bundle.main.bundleURL)
+        for url in flats {
+            if manager.fileExists(
+                atPath: url.appendingPathComponent("courses", isDirectory: true).path,
+                isDirectory: &isDir), isDir.boolValue
+            {
+                return url
+            }
+            if manager.fileExists(atPath: url.appendingPathComponent("favico.png").path) {
+                return url
+            }
+        }
+        return nil
+    }
+
+    /// `<base>/<name>/` when present, otherwise nil.
+    static func subdirectory(_ name: String) -> URL? {
+        guard let base = baseURL() else { return nil }
+        let url = base.appendingPathComponent(name, isDirectory: true)
+        var isDir: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir),
+            isDir.boolValue
+        else { return nil }
+        return url
+    }
+
+    /// `<base>/<name>.<ext>` when present, otherwise nil.
+    static func url(forResource name: String, withExtension ext: String) -> URL? {
+        guard let base = baseURL() else { return nil }
+        let url = base.appendingPathComponent("\(name).\(ext)")
+        return FileManager.default.fileExists(atPath: url.path) ? url : nil
+    }
+}
+
 enum AppSupport {
     static let appName = "BIT Typing"
 
@@ -49,7 +125,11 @@ enum AppSupport {
 
     private static func seed(bundleName: String, destination: URL, extension ext: String, refresh: Bool) {
         let manager = FileManager.default
-        guard let source = Bundle.module.resourceURL?.appendingPathComponent(bundleName, isDirectory: true),
+        // NOTE: intentionally not `Bundle.module` — its generated accessor
+        // fatalErrors when the resource bundle isn't at its two hardcoded
+        // paths (always the case for a relocated .app), killing the app at
+        // launch. `AppResources` returns nil instead and we skip seeding.
+        guard let source = AppResources.subdirectory(bundleName),
             let files = try? manager.contentsOfDirectory(at: source, includingPropertiesForKeys: nil)
         else { return }
         for file in files where file.pathExtension.lowercased() == ext {

@@ -13,7 +13,12 @@ struct LessonTextView: View {
     var activeIndex: Int
 
     var body: some View {
-        GeometryReader { proxy in
+        // Convert once: `characters` used to be a computed property, so every
+        // `characters[offset]` inside the cell loop reconverted the whole
+        // string (~240 full conversions per keystroke on long lessons).
+        let chars = Array(text)
+        let offsets = Self.visibleOffsets(count: chars.count, active: activeIndex)
+        return GeometryReader { proxy in
             ScrollViewReader { scroll in
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 0) {
@@ -24,12 +29,13 @@ struct LessonTextView: View {
                             // 2394 Text views blocks the main thread (beachball
                             // on launch, Start unclickable). Render ~240 cells
                             // around the cursor like render_text() does.
-                            ForEach(visibleOffsets, id: \.self) { offset in
+                            ForEach(offsets, id: \.self) { offset in
                                 CharacterCell(
-                                    char: characters[offset],
+                                    char: chars[offset],
                                     state: states[offset],
-                                    isActive: offset == activeIndex && activeIndex < characters.count
+                                    isActive: offset == activeIndex && activeIndex < chars.count
                                 )
+                                .equatable()
                                 .id(offset)
                             }
                         }
@@ -37,9 +43,13 @@ struct LessonTextView: View {
                     }
                     .frame(minHeight: proxy.size.height)
                 }
-                .onChange(of: activeIndex) { _, next in
-                    let target = min(next, max(0, characters.count - 1))
-                    if reduceMotion {
+                .onChange(of: activeIndex) { old, next in
+                    let target = min(next, max(0, chars.count - 1))
+                    // Single-step typing advances need no animation: a fresh
+                    // 0.12s easeOut on every keystroke piles overlapping
+                    // animations onto weak GPUs so the text trails the keys.
+                    // Animate only real jumps (restart, lesson switch).
+                    if reduceMotion || abs(next - old) <= 8 {
                         scroll.scrollTo(target, anchor: .center)
                     } else {
                         withAnimation(.easeOut(duration: 0.12)) {
@@ -48,7 +58,7 @@ struct LessonTextView: View {
                     }
                 }
                 .onAppear {
-                    scroll.scrollTo(min(activeIndex, max(0, characters.count - 1)), anchor: .center)
+                    scroll.scrollTo(min(activeIndex, max(0, chars.count - 1)), anchor: .center)
                 }
             }
         }
@@ -56,38 +66,54 @@ struct LessonTextView: View {
         // reconstructing meaning from individual cells.
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text("Lesson text"))
-        .accessibilityValue(Text(accessibilityProgress))
-    }
-
-    private var characters: [Character] {
-        Array(text)
+        .accessibilityValue(Text(accessibilityProgress(count: chars.count)))
     }
 
     /// Visible window around the cursor. Keeps ~80 finished chars on the
     /// left and ~160 upcoming chars on the right so long lessons stay at
     /// a flat view count instead of growing with lesson length.
-    private var visibleOffsets: [Int] {
-        let count = characters.count
+    private static func visibleOffsets(count: Int, active: Int) -> [Int] {
         guard count > 0 else { return [] }
-        let low = max(0, min(activeIndex, count - 1) - 80)
-        let high = min(count, low + 240, min(activeIndex, count - 1) + 160)
+        let cursor = min(max(active, 0), count - 1)
+        let low = max(0, cursor - 80)
+        let high = min(count, low + 240, cursor + 160)
         let adjustedLow = max(0, high - 240)
         return Array(adjustedLow..<high)
     }
 
-    private var accessibilityProgress: String {
-        guard !characters.isEmpty else { return "empty" }
-        return "\(min(activeIndex + 1, characters.count)) of \(characters.count)"
+    private func accessibilityProgress(count: Int) -> String {
+        guard count > 0 else { return "empty" }
+        return "\(min(activeIndex + 1, count)) of \(count)"
+    }
+}
+
+// MARK: - View Identity
+
+extension LessonTextView: Equatable {
+    // Manual implementation: the @Environment members must not participate.
+    // Lets SwiftUI skip this whole subtree on timer ticks that only change
+    // the toolbar metrics, via `.equatable()` at the call site.
+    nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.text == rhs.text
+            && lhs.activeIndex == rhs.activeIndex
+            && lhs.states == rhs.states
     }
 }
 
 // MARK: - Private
 
-private struct CharacterCell: View {
+private struct CharacterCell: View, Equatable {
     @Environment(\.colorScheme) private var scheme
     var char: Character
     var state: CharState?
     var isActive: Bool
+
+    // Manual implementation: the @Environment member must not participate.
+    // Unchanged cells then skip re-render on every keystroke (paired with
+    // `.equatable()` above — only the two flipped cells rebuild).
+    nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.char == rhs.char && lhs.state == rhs.state && lhs.isActive == rhs.isActive
+    }
 
     var body: some View {
         Text(displayed)
