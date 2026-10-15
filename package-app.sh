@@ -19,25 +19,18 @@ APP="BIT Typing.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 
-# Locate build products robustly: newer toolchains put them under
-# .build/<triple>/<config>/ with .build/<config> as a symlink, and the
-# triple varies (x86_64 vs arm64). Fail loudly instead of shipping an app
-# whose resource bundle is missing (that used to crash at launch via a
-# Bundle.module fatalError on any machine other than the build host).
-BIN_SRC=""
-for CAND in ".build/$CONFIG/BITTyping" .build/*/"$CONFIG"/BITTyping; do
-    if [[ -f "$CAND" ]]; then BIN_SRC="$CAND"; break; fi
-done
-if [[ -z "$BIN_SRC" ]]; then
-    echo "Error: BITTyping binary not found under .build/ for config '$CONFIG'." >&2
+# Ask SwiftPM for the product directory: its layout depends on the build
+# system and toolchain. Avoid globs, which zsh rejects when they don't match.
+# Require the resource bundle too, since a missing bundle crashes at launch.
+BIN_DIR="$(swift build -c "$CONFIG" --show-bin-path)"
+BIN_SRC="$BIN_DIR/BITTyping"
+if [[ ! -f "$BIN_SRC" ]]; then
+    echo "Error: BITTyping binary not found in '$BIN_DIR'." >&2
     exit 1
 fi
-BUNDLE_SRC=""
-for CAND in ".build/$CONFIG/BITTyping_BITTyping.bundle" .build/*/"$CONFIG"/BITTyping_BITTyping.bundle; do
-    if [[ -d "$CAND" ]]; then BUNDLE_SRC="$CAND"; break; fi
-done
-if [[ -z "$BUNDLE_SRC" ]]; then
-    echo "Error: BITTyping_BITTyping.bundle not found under .build/ for config '$CONFIG'." >&2
+BUNDLE_SRC="$BIN_DIR/BITTyping_BITTyping.bundle"
+if [[ ! -d "$BUNDLE_SRC" ]]; then
+    echo "Error: BITTyping_BITTyping.bundle not found in '$BIN_DIR'." >&2
     exit 1
 fi
 
@@ -49,7 +42,8 @@ cp -R "$BUNDLE_SRC" "$APP/Contents/Resources/"
 # format unrecognized, invalid, or unsuitable"), so don't add one — the app
 # locates the Resources copy on its own.
 
-if [[ ! -d "$APP/Contents/Resources/BITTyping_BITTyping.bundle/courses" ]]; then
+BUNDLE_DEST="$APP/Contents/Resources/BITTyping_BITTyping.bundle"
+if [[ ! -d "$BUNDLE_DEST/courses" && ! -d "$BUNDLE_DEST/Contents/Resources/courses" ]]; then
     echo "Error: resource bundle copy failed — courses/ missing in $APP/Contents/Resources/." >&2
     exit 1
 fi
