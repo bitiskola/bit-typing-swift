@@ -9,7 +9,7 @@ enum AppResources {
     static let bundleFileName = "BITTyping_BITTyping.bundle"
 
     /// Root directory directly containing `courses/`, `lang/`, `keyboards/`,
-    /// `sounds/` and `favico.png` — either the SwiftPM `.bundle` wrapper or a
+    /// `sounds/` and `favico.png` — either the SwiftPM `.bundle` resource directory or a
     /// flattened layout (e.g. `Contents/Resources` itself).
     ///
     /// Never traps: SwiftPM's generated `Bundle.module` calls `fatalError`
@@ -36,6 +36,12 @@ enum AppResources {
         }
         for url in bundles {
             if manager.fileExists(atPath: url.path, isDirectory: &isDir), isDir.boolValue {
+                // Xcode builds use a macOS bundle; native SwiftPM builds
+                // place the resources directly inside the wrapper.
+                let resources = url.appendingPathComponent("Contents/Resources", isDirectory: true)
+                if manager.fileExists(atPath: resources.path, isDirectory: &isDir), isDir.boolValue {
+                    return resources
+                }
                 return url
             }
         }
