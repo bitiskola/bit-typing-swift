@@ -32,13 +32,7 @@ struct ContentView: View {
             detailView
         }
         .background {
-            if #available(macOS 26, *) {
-                // Liquid Glass window: leave the system background alone so
-                // the native toolbar and glass controls blend into it.
-                Color.clear
-            } else {
-                Theme.background(scheme)
-            }
+            Theme.background(scheme)
         }
         .environment(\.speedUnit, state.speedUnit)
         .sheet(isPresented: $state.showingOptions) { OptionsView(state: state) }

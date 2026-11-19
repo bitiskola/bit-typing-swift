@@ -10,10 +10,50 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
+# Prepare toolchain fixes for CommandLineTools manifest & bridging header bugs
+FIX_DIR="$(pwd)/.build/manifest-fix"
+if [[ ! -d "$FIX_DIR/ManifestAPI" ]]; then
+    mkdir -p "$FIX_DIR/ManifestAPI"
+    CLT_MANIFEST_DIR="$(xcode-select -p)/usr/lib/swift/pm/ManifestAPI"
+    if [[ -d "$CLT_MANIFEST_DIR" ]]; then
+        cp -R "$CLT_MANIFEST_DIR"/* "$FIX_DIR/ManifestAPI/"
+        rm -f "$FIX_DIR/ManifestAPI"/PackageDescription.swiftmodule/*.private.swiftinterface
+    fi
+fi
+if [[ ! -f "$FIX_DIR/vfs.yaml" ]]; then
+    mkdir -p "$FIX_DIR"
+    touch "$FIX_DIR/empty.modulemap"
+    cat > "$FIX_DIR/vfs.yaml" <<EOF
+{
+  "version": 0,
+  "case-sensitive": "false",
+  "roots": [
+    {
+      "type": "directory",
+      "name": "$(xcode-select -p)/usr/include/swift",
+      "contents": [
+        {
+          "type": "file",
+          "name": "bridging.modulemap",
+          "external-contents": "$FIX_DIR/empty.modulemap"
+        }
+      ]
+    }
+  ]
+}
+EOF
+fi
+
+export SWIFTPM_CUSTOM_LIBS_DIR="$FIX_DIR"
+EXTRA_SWIFTC_FLAGS=()
+if [[ -f "$FIX_DIR/vfs.yaml" ]]; then
+    EXTRA_SWIFTC_FLAGS=("-Xswiftc" "-vfsoverlay" "-Xswiftc" "$FIX_DIR/vfs.yaml")
+fi
+
 CONFIG=release
 if [[ "${1:-}" == "--debug" ]]; then CONFIG=debug; fi
 
-swift build -c "$CONFIG"
+swift build -c "$CONFIG" "${EXTRA_SWIFTC_FLAGS[@]}"
 
 APP="BIT Typing.app"
 rm -rf "$APP"

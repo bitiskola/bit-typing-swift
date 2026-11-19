@@ -142,21 +142,24 @@ struct ResultsView: View {
         }
     }
 
+    private var overviewStatsText: String {
+        let line1 = "\(state.t("characters")): \(attempt.characters)     \(state.t("words")): \(attempt.words)     "
+        let line2 = "\(state.t("errors")): \(attempt.errors)     \(state.t("timeouts")): \(attempt.timeouts)\n"
+        let line3 = "\(state.t("fixed_characters")): \(attempt.fixedCharacters)     "
+        let line4 = "\(state.t("fixed_words")): \(attempt.fixedWords)     "
+        let line5 = "\(state.t("backspaces")): \(attempt.backspaces)     "
+        let line6 = "\(state.t("duration")): \(String(format: "%.1fs", attempt.duration))"
+        return line1 + line2 + line3 + line4 + line5 + line6
+    }
+
     private var overviewTab: some View {
         Card {
             VStack(alignment: .leading, spacing: 10) {
                 Text(attempt.passed ? state.t("passed_tip") : state.t("retry_tip"))
                     .font(.system(size: 16, weight: .bold))
-                Text(
-                    "\(state.t("characters")): \(attempt.characters)     \(state.t("words")): \(attempt.words)     "
-                        + "\(state.t("errors")): \(attempt.errors)     \(state.t("timeouts")): \(attempt.timeouts)\n"
-                        + "\(state.t("fixed_characters")): \(attempt.fixedCharacters)     "
-                        + "\(state.t("fixed_words")): \(attempt.fixedWords)     "
-                        + "\(state.t("backspaces")): \(attempt.backspaces)     "
-                        + "\(state.t("duration")): \(String(format: "%.1fs", attempt.duration))"
-                )
-                .font(.system(size: 15))
-                .foregroundStyle(Theme.muted(scheme))
+                Text(overviewStatsText)
+                    .font(.system(size: 15))
+                    .foregroundStyle(Theme.muted(scheme))
                 Spacer()
             }
             .frame(maxWidth: .infinity, alignment: .leading)

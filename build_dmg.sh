@@ -54,6 +54,48 @@ fi
 echo "Building $APP_NAME with Swift..."
 cd "$PROJECT_DIR"
 
+# Prepare toolchain fixes for CommandLineTools manifest & bridging header bugs
+FIX_DIR="$PROJECT_DIR/.build/manifest-fix"
+if [[ ! -d "$FIX_DIR/ManifestAPI" ]]; then
+    mkdir -p "$FIX_DIR/ManifestAPI"
+    CLT_MANIFEST_DIR="$(xcode-select -p)/usr/lib/swift/pm/ManifestAPI"
+    if [[ -d "$CLT_MANIFEST_DIR" ]]; then
+        cp -R "$CLT_MANIFEST_DIR"/* "$FIX_DIR/ManifestAPI/"
+        rm -f "$FIX_DIR/ManifestAPI"/PackageDescription.swiftmodule/*.private.swiftinterface
+    fi
+fi
+if [[ ! -f "$FIX_DIR/vfs.yaml" ]]; then
+    mkdir -p "$FIX_DIR"
+    touch "$FIX_DIR/empty.modulemap"
+    cat > "$FIX_DIR/vfs.yaml" <<EOF
+{
+  "version": 0,
+  "case-sensitive": "false",
+  "roots": [
+    {
+      "type": "directory",
+      "name": "$(xcode-select -p)/usr/include/swift",
+      "contents": [
+        {
+          "type": "file",
+          "name": "bridging.modulemap",
+          "external-contents": "$FIX_DIR/empty.modulemap"
+        }
+      ]
+    }
+  ]
+}
+EOF
+fi
+
+export SWIFTPM_CUSTOM_LIBS_DIR="$FIX_DIR"
+EXTRA_SWIFTC_FLAGS=()
+EXTRA_SWIFTC_RAW_FLAGS=()
+if [[ -f "$FIX_DIR/vfs.yaml" ]]; then
+    EXTRA_SWIFTC_FLAGS=("-Xswiftc" "-vfsoverlay" "-Xswiftc" "$FIX_DIR/vfs.yaml")
+    EXTRA_SWIFTC_RAW_FLAGS=("-vfsoverlay" "$FIX_DIR/vfs.yaml")
+fi
+
 export BIT_TYPING_VERSION="$APP_VERSION"
 if [[ -n "${MACOS_TARGET_ARCH:-}" ]]; then
     case "$MACOS_TARGET_ARCH" in
@@ -70,7 +112,7 @@ if [[ -n "${MACOS_TARGET_ARCH:-}" ]]; then
     esac
 fi
 
-swift build
+swift build -c release "${EXTRA_SWIFTC_FLAGS[@]}"
 
 echo "Packaging $APP_NAME.app..."
 ./package-app.sh
@@ -190,7 +232,7 @@ guard let png = rep.representation(using: .png, properties: [:]) else {
 try! png.write(to: URL(fileURLWithPath: output))
 SWIFT
 
-    swiftc "$BACKGROUND_SWIFT" -o "$DMG_TEMP_ROOT/make-background" \
+    swiftc "${EXTRA_SWIFTC_RAW_FLAGS[@]}" "$BACKGROUND_SWIFT" -o "$DMG_TEMP_ROOT/make-background" \
         -framework AppKit
     "$DMG_TEMP_ROOT/make-background" "$python_background"
 else

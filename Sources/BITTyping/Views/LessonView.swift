@@ -83,23 +83,12 @@ struct LessonView: View {
     }
 
     private var startButton: some View {
-        Group {
-            if #available(macOS 26, *) {
-                Button(action: state.toggleStart) {
-                    Label(state.t(state.startButtonKey), systemImage: startIcon)
-                }
-                .buttonStyle(.glassProminent)
-                .tint(Theme.brand(scheme))
-                .disabled(state.currentURL() == nil)
-            } else {
-                Button(action: state.toggleStart) {
-                    Label(state.t(state.startButtonKey), systemImage: startIcon)
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(Theme.brand(scheme))
-                .disabled(state.currentURL() == nil)
-            }
+        Button(action: state.toggleStart) {
+            Label(state.t(state.startButtonKey), systemImage: startIcon)
         }
+        .buttonStyle(.borderedProminent)
+        .tint(Theme.brand(scheme))
+        .disabled(state.currentURL() == nil)
     }
 
     /// Play while idle/paused, pause while running.

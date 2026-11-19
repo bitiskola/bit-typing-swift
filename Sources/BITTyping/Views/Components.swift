@@ -28,25 +28,13 @@ struct AppButtonStyle: ButtonStyle {
     var kind: Kind = .primary
 
     func makeBody(configuration: Configuration) -> some View {
-        Group {
-            if #available(macOS 26, *) {
-                GlassButtonLabel(
-                    configuration: configuration,
-                    kind: kind,
-                    scheme: scheme,
-                    font: labelFont,
-                    height: controlHeight
-                )
-            } else {
-                LegacyButtonLabel(
-                    configuration: configuration,
-                    kind: kind,
-                    scheme: scheme,
-                    font: labelFont,
-                    height: controlHeight
-                )
-            }
-        }
+        LegacyButtonLabel(
+            configuration: configuration,
+            kind: kind,
+            scheme: scheme,
+            font: labelFont,
+            height: controlHeight
+        )
         .opacity(isEnabled ? 1 : 0.45)
         // Pressed: shrink slightly. Hovered: lift the fill a touch. Both
         // animate so every button in the app feels tactile.
@@ -78,50 +66,7 @@ struct AppButtonStyle: ButtonStyle {
     }
 }
 
-/// Liquid Glass rendering (macOS 26+). Tint carries the preset hierarchy:
-/// ink-tinted for primary, neutral glass for secondary, blue for brand.
-@available(macOS 26, *)
-private struct GlassButtonLabel: View {
-    var configuration: AppButtonStyle.Configuration
-    var kind: AppButtonStyle.Kind
-    var scheme: ColorScheme
-    var font: Font
-    var height: Double
-
-    var body: some View {
-        configuration.label
-            .font(font)
-            .padding(.horizontal, 14)
-            .frame(height: height)
-            .foregroundStyle(labelColor)
-            .glassEffect(glass, in: .capsule)
-    }
-
-    private var labelColor: Color {
-        switch kind {
-        case .primary:
-            return scheme == .dark ? .black : .white
-        case .secondary:
-            return Theme.ink(scheme)
-        case .brand:
-            return .white
-        }
-    }
-
-    private var glass: Glass {
-        switch kind {
-        case .primary:
-            // Ink-tinted glass keeps the monochrome hierarchy in glass.
-            .regular.tint((scheme == .dark ? Color.white : Color.black).opacity(0.55)).interactive()
-        case .secondary:
-            .regular.interactive()
-        case .brand:
-            .regular.tint(Theme.brand(scheme)).interactive()
-        }
-    }
-}
-
-/// Pre-macOS 26 fallback: solid monochrome pills, same metrics as glass.
+/// Solid monochrome pills, same metrics as original design.
 private struct LegacyButtonLabel: View {
     var configuration: AppButtonStyle.Configuration
     var kind: AppButtonStyle.Kind
@@ -200,19 +145,10 @@ struct Card<Content: View>: View {
     }
 
     var body: some View {
-        Group {
-            if #available(macOS 26, *) {
-                content
-                    .background(glassBackground)
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-                    .overlay(stroke)
-            } else {
-                content
-                    .background(cardBackground)
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-                    .overlay(stroke)
-            }
-        }
+        content
+            .background(cardBackground)
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .overlay(stroke)
     }
 
     @ViewBuilder
@@ -228,21 +164,6 @@ struct Card<Content: View>: View {
             AnyShapeStyle(backgroundStyle)
         } else {
             AnyShapeStyle(Theme.panel(scheme))
-        }
-    }
-
-    @available(macOS 26, *)
-    private var glassBackground: some View {
-        Group {
-            if let backgroundStyle {
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(AnyShapeStyle(backgroundStyle))
-                    .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 12))
-            } else {
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(Theme.panel(scheme))
-                    .glassEffect(.regular, in: .rect(cornerRadius: 12))
-            }
         }
     }
 }
@@ -277,25 +198,13 @@ struct CardModifier: ViewModifier {
     @Environment(\.cardBackgroundStyle) private var backgroundStyle
 
     func body(content: Content) -> some View {
-        Group {
-            if #available(macOS 26, *) {
-                content
-                    .background(glassBackground)
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12)
-                            .stroke(Theme.border(scheme), lineWidth: 1)
-                    )
-            } else {
-                content
-                    .background(background)
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12)
-                            .stroke(Theme.border(scheme), lineWidth: 1)
-                    )
-            }
-        }
+        content
+            .background(background)
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(Theme.border(scheme), lineWidth: 1)
+            )
     }
 
     private var background: AnyShapeStyle {
@@ -305,28 +214,12 @@ struct CardModifier: ViewModifier {
             AnyShapeStyle(Theme.panel(scheme))
         }
     }
-
-    @available(macOS 26, *)
-    private var glassBackground: some View {
-        Group {
-            if let backgroundStyle {
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(AnyShapeStyle(backgroundStyle))
-                    .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 12))
-            } else {
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(Theme.panel(scheme))
-                    .glassEffect(.regular, in: .rect(cornerRadius: 12))
-            }
-        }
-    }
 }
 
-// MARK: - Acting with Glass Buttons
+// MARK: - Acting with Action Buttons
 
-/// System Liquid Glass button with a theme tint: prominent actions default
+/// System button with a theme tint: prominent actions default
 /// to the brand blue, secondary actions stay neutral unless given a `tint`.
-/// Pre-26 falls back to the bordered styles with the same hierarchy.
 struct GlassActionButton: View {
     @Environment(\.colorScheme) private var scheme
     var title: String
@@ -338,20 +231,7 @@ struct GlassActionButton: View {
 
     var body: some View {
         Group {
-            if #available(macOS 26, *) {
-                if prominent {
-                    Button(action: action) { buttonLabel() }
-                        .buttonStyle(.glassProminent)
-                        .tint(tint ?? Theme.brand(scheme))
-                } else if let tint {
-                    Button(action: action) { buttonLabel() }
-                        .buttonStyle(.glass)
-                        .tint(tint)
-                } else {
-                    Button(action: action) { buttonLabel() }
-                        .buttonStyle(.glass)
-                }
-            } else if prominent {
+            if prominent {
                 Button(action: action) { buttonLabel() }
                     .buttonStyle(.borderedProminent)
                     .tint(tint ?? Theme.brand(scheme))

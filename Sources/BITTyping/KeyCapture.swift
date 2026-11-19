@@ -112,7 +112,7 @@ struct KeyCaptureView: NSViewRepresentable {
         /// Local monitors always fire on the main thread, so assuming the
         /// main actor here is safe.
         private static func isEditingOnMain() -> Bool {
-            MainActor.assumeIsolated(isEditing)
+            MainActor.assumeIsolated { isEditing() }
         }
 
         @MainActor

@@ -88,14 +88,8 @@ struct EditorView: View {
             .padding(10)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background {
-                if #available(macOS 26, *) {
-                    RoundedRectangle(cornerRadius: 12)
-                        .fill(Theme.panel(scheme).opacity(0.6))
-                        .glassEffect(.regular, in: .rect(cornerRadius: 12))
-                } else {
-                    RoundedRectangle(cornerRadius: 12)
-                        .fill(Theme.panel(scheme))
-                }
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(Theme.panel(scheme))
             }
     }
 
