@@ -37,7 +37,12 @@ struct ContentView: View {
         .environment(\.speedUnit, state.speedUnit)
         .sheet(isPresented: $state.showingOptions) { OptionsView(state: state) }
         .sheet(isPresented: $state.showingAbout) { AboutView(state: state) }
-        .sheet(item: $state.resultsAttempt) { attempt in ResultsView(state: state, attempt: attempt) }
+        .sheet(item: $state.resultsAttempt, onDismiss: state.resultsDismissed) { attempt in
+            ResultsView(state: state, attempt: attempt)
+        }
+        // A sheet over a running lesson must not keep the clock going.
+        .onChange(of: state.showingOptions) { _, showing in if showing { state.pauseForModal() } }
+        .onChange(of: state.showingAbout) { _, showing in if showing { state.pauseForModal() } }
         .sheet(isPresented: $state.showingWellDone) {
             WellDoneView(state: state)
                 .interactiveDismissDisabled()
@@ -80,6 +85,7 @@ struct ContentView: View {
         case .lesson: return "keyboard"
         case .stats: return "chart.bar"
         case .editor: return "square.and.pencil"
+        case .repos: return "shippingbox"
         }
     }
 
@@ -92,6 +98,8 @@ struct ContentView: View {
             StatsView(state: state)
         case .editor:
             EditorView(state: state)
+        case .repos:
+            ReposView(state: state)
         }
     }
 
@@ -100,6 +108,7 @@ struct ContentView: View {
         case .lesson: return state.t("current_lesson")
         case .stats: return state.t("student_statistics")
         case .editor: return state.t("lesson_editor")
+        case .repos: return state.t("course_repos")
         }
     }
 }

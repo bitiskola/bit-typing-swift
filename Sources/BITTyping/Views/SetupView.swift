@@ -133,19 +133,18 @@ struct SetupView: View {
             invalid = true
             return
         }
-        state.settings.setupComplete = true
-        state.settings.language = language
-        state.settings.keyboardLayout = keyboard
-        state.settings.typoMode = typo
-        state.settings.goalWpm = wpm
-        state.settings.goalAccuracy = accuracy
-        state.settings.autoStart = autoStart
-        state.settings.backspace = backspace
-        state.settings.sound = sound
-        state.settings.metronome = metronome
-        state.saveSettings()
-        state.loadResources()
-        state.reloadCourses(select: state.selectedLesson)
+        var updated = state.settings
+        updated.setupComplete = true
+        updated.language = language
+        updated.keyboardLayout = keyboard
+        updated.typoMode = typo
+        updated.goalWpm = wpm
+        updated.goalAccuracy = accuracy
+        updated.autoStart = autoStart
+        updated.backspace = backspace
+        updated.sound = sound
+        updated.metronome = metronome
+        state.applySettings(updated)
         state.showingSetup = false
     }
 }

@@ -8,7 +8,7 @@ import Foundation
 enum AppResources {
     static let bundleFileName = "BITTyping_BITTyping.bundle"
 
-    /// Root directory directly containing `courses/`, `lang/`, `keyboards/`,
+    /// Root directory directly containing `default-repo/`, `lang/`, `keyboards/`,
     /// `sounds/` and `favico.png` — either the SwiftPM `.bundle` resource directory or a
     /// flattened layout (e.g. `Contents/Resources` itself).
     ///
@@ -56,7 +56,7 @@ enum AppResources {
         flats.append(Bundle.main.bundleURL)
         for url in flats {
             if manager.fileExists(
-                atPath: url.appendingPathComponent("courses", isDirectory: true).path,
+                atPath: url.appendingPathComponent("default-repo", isDirectory: true).path,
                 isDirectory: &isDir), isDir.boolValue
             {
                 return url
@@ -104,6 +104,10 @@ enum AppSupport {
     static var settingsFile: URL { data.appendingPathComponent("settings.json") }
     static var historyFile: URL { data.appendingPathComponent("history.json") }
     static var customCoursesFile: URL { data.appendingPathComponent("custom_courses.json") }
+    /// Git checkouts of course packs, one folder per repo slug.
+    static var repos: URL { root.appendingPathComponent("repos", isDirectory: true) }
+    /// Configured course pack URLs (same file name as the Rust port).
+    static var reposFile: URL { data.appendingPathComponent("course_repos.json") }
 
     static let builtinCourseFiles: Set<String> = [
         "01-Home-row.txt",
@@ -114,19 +118,61 @@ enum AppSupport {
     // MARK: - Seeding Bundled Defaults
 
     /// Copy bundled resources into Application Support on first launch.
-    /// Courses are seeded once (user-editable), but lang/keyboards/sounds
-    /// are app-owned and always refreshed — otherwise existing installs
-    /// keep stale copies missing newer keys (e.g. `cpm_name`).
+    /// lang/keyboards/sounds are app-owned and always refreshed — otherwise
+    /// existing installs keep stale copies missing newer keys (e.g.
+    /// `cpm_name`). Lessons come from course pack repos; the default pack
+    /// ships as a snapshot so the first launch works offline.
     static func ensureSeeded() {
         let manager = FileManager.default
-        for dir in [courses, languages, keyboards, sounds] {
+        for dir in [courses, languages, keyboards, sounds, repos] {
             try? manager.createDirectory(at: dir, withIntermediateDirectories: true)
         }
         try? manager.createDirectory(at: data, withIntermediateDirectories: true)
-        seed(bundleName: "courses", destination: courses, extension: "txt", refresh: false)
         seed(bundleName: "lang", destination: languages, extension: "json", refresh: true)
         seed(bundleName: "keyboards", destination: keyboards, extension: "json", refresh: true)
         seed(bundleName: "sounds", destination: sounds, extension: "wav", refresh: true)
+        seedDefaultRepo()
+        removeLegacySeededCourses()
+    }
+
+    /// Place the bundled default pack snapshot where its git checkout will
+    /// live. The first successful refresh replaces it with a real clone.
+    private static func seedDefaultRepo() {
+        let manager = FileManager.default
+        let destination = repos.appendingPathComponent(CourseRepos.slug(for: CourseRepos.defaultURL), isDirectory: true)
+        guard !manager.fileExists(atPath: destination.path),
+            let source = AppResources.subdirectory("default-repo")
+        else { return }
+        try? manager.copyItem(at: source, to: destination)
+    }
+
+    /// Older builds copied the built-in lessons into `courses/`. They now
+    /// come from the default pack, so drop local copies that are still
+    /// byte-identical to the bundled ones (edited or custom files stay).
+    private static func removeLegacySeededCourses() {
+        let manager = FileManager.default
+        guard let bundled = AppResources.subdirectory("default-repo"),
+            let packs = try? manager.contentsOfDirectory(at: bundled, includingPropertiesForKeys: nil),
+            let locals = try? manager.contentsOfDirectory(at: courses, includingPropertiesForKeys: nil)
+        else { return }
+        let custom = Set(readJSON(customCoursesFile, as: [String].self, default: []))
+        var originals: [String: [Data]] = [:]
+        for pack in packs {
+            let files = (try? manager.contentsOfDirectory(at: pack, includingPropertiesForKeys: nil)) ?? []
+            for file in files where file.pathExtension.lowercased() == "txt" {
+                if let data = try? Data(contentsOf: file) {
+                    originals[file.lastPathComponent, default: []].append(data)
+                }
+            }
+        }
+        for file in locals where file.pathExtension.lowercased() == "txt" {
+            guard !custom.contains(file.lastPathComponent),
+                let candidates = originals[file.lastPathComponent],
+                let data = try? Data(contentsOf: file),
+                candidates.contains(data)
+            else { continue }
+            try? manager.removeItem(at: file)
+        }
     }
 
     private static func seed(bundleName: String, destination: URL, extension ext: String, refresh: Bool) {

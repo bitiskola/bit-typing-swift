@@ -108,27 +108,26 @@ struct OptionsView: View {
             invalid = true
             return
         }
-        let oldLanguage = state.settings.language
-        state.settings.language = language
-        state.settings.keyboardLayout = keyboard
-        state.settings.typoMode = typo
-        state.settings.goalWpm = wpm
-        state.settings.goalAccuracy = accuracy
-        state.settings.timeoutSeconds = slow
-        state.settings.timedMinutes = timed
-        state.settings.autoStart = autoStart
-        state.settings.backspace = backspace
-        state.settings.metronome = metronome
-        state.settings.sound = sound
-        if language != oldLanguage,
+        var updated = state.settings
+        updated.language = language
+        updated.keyboardLayout = keyboard
+        updated.typoMode = typo
+        updated.goalWpm = wpm
+        updated.goalAccuracy = accuracy
+        updated.timeoutSeconds = slow
+        updated.timedMinutes = timed
+        updated.autoStart = autoStart
+        updated.backspace = backspace
+        updated.metronome = metronome
+        updated.sound = sound
+        if language != state.settings.language,
             let defaultKeyboard = state.languages[language]?.defaultKeyboard,
             state.keyboardLayouts[defaultKeyboard] != nil
         {
-            state.settings.keyboardLayout = defaultKeyboard
+            updated.keyboardLayout = defaultKeyboard
         }
-        state.saveSettings()
-        state.loadResources()
-        state.reloadCourses(select: state.selectedLesson)
+        // Saving options never restarts the current lesson.
+        state.applySettings(updated)
         dismiss()
     }
 }

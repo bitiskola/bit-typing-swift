@@ -53,13 +53,16 @@ struct Session: Sendable {
     var pendingWrong: Bool = false
     var states: [Int: CharState] = [:]
     var strokes: [Stroke] = []
+    /// Time already spent before this run, when continuing an unfinished
+    /// attempt. Counted into `elapsed()` so the clock picks up where it was.
+    var resumedElapsed: TimeInterval = 0
 
     // MARK: - Measuring Elapsed Time
 
     func elapsed(now: Date = Date()) -> TimeInterval {
-        guard let startedAt else { return 0 }
+        guard let startedAt else { return resumedElapsed }
         let end = paused ? (pausedAt ?? now) : now
-        return max(0, end.timeIntervalSince(startedAt) - pausedTotal)
+        return resumedElapsed + max(0, end.timeIntervalSince(startedAt) - pausedTotal)
     }
 }
 
@@ -89,6 +92,14 @@ struct Attempt: Codable, Identifiable, Sendable {
     var text: String = ""
     var states: [String: CharState] = [:]
     var strokes: [Stroke] = []
+    /// Finished early: can be continued from Statistics, and finishing the
+    /// continuation updates this row in place.
+    var unfinished: Bool = false
+    /// Stable course id (`local:<stem>` / `repo:<slug>:<layout>:<stem>`) so a
+    /// continued attempt finds its lesson again.
+    var courseID: String = ""
+    /// Backspace-repaired indices, restored when continuing.
+    var fixedIndices: [Int] = []
 
     enum CodingKeys: String, CodingKey {
         case lesson
@@ -112,12 +123,51 @@ struct Attempt: Codable, Identifiable, Sendable {
         case text
         case states
         case strokes
+        case unfinished
+        case courseID = "course_id"
+        case fixedIndices = "fixed_indices"
     }
 
     // MARK: - Reading Character States
 
     func state(at index: Int) -> CharState? {
         states[String(index)]
+    }
+}
+
+// MARK: - Decoding Older History
+
+extension Attempt {
+    /// Every key is optional so `history.json` files written by older
+    /// versions (without `unfinished`, `course_id`, …) still load instead
+    /// of silently resetting the whole history.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init()
+        lesson = try c.decodeIfPresent(String.self, forKey: .lesson) ?? lesson
+        startedAt = try c.decodeIfPresent(String.self, forKey: .startedAt) ?? startedAt
+        courseFile = try c.decodeIfPresent(String.self, forKey: .courseFile) ?? courseFile
+        customCourse = try c.decodeIfPresent(Bool.self, forKey: .customCourse) ?? customCourse
+        finishedAt = try c.decodeIfPresent(String.self, forKey: .finishedAt) ?? finishedAt
+        duration = try c.decodeIfPresent(Double.self, forKey: .duration) ?? duration
+        wpm = try c.decodeIfPresent(Double.self, forKey: .wpm) ?? wpm
+        accuracy = try c.decodeIfPresent(Double.self, forKey: .accuracy) ?? accuracy
+        slowdown = try c.decodeIfPresent(Double.self, forKey: .slowdown) ?? slowdown
+        done = try c.decodeIfPresent(Double.self, forKey: .done) ?? done
+        words = try c.decodeIfPresent(Int.self, forKey: .words) ?? words
+        fixedWords = try c.decodeIfPresent(Int.self, forKey: .fixedWords) ?? fixedWords
+        characters = try c.decodeIfPresent(Int.self, forKey: .characters) ?? characters
+        fixedCharacters = try c.decodeIfPresent(Int.self, forKey: .fixedCharacters) ?? fixedCharacters
+        errors = try c.decodeIfPresent(Int.self, forKey: .errors) ?? errors
+        timeouts = try c.decodeIfPresent(Int.self, forKey: .timeouts) ?? timeouts
+        backspaces = try c.decodeIfPresent(Int.self, forKey: .backspaces) ?? backspaces
+        passed = try c.decodeIfPresent(Bool.self, forKey: .passed) ?? passed
+        text = try c.decodeIfPresent(String.self, forKey: .text) ?? text
+        states = try c.decodeIfPresent([String: CharState].self, forKey: .states) ?? states
+        strokes = try c.decodeIfPresent([Stroke].self, forKey: .strokes) ?? strokes
+        unfinished = try c.decodeIfPresent(Bool.self, forKey: .unfinished) ?? unfinished
+        courseID = try c.decodeIfPresent(String.self, forKey: .courseID) ?? courseID
+        fixedIndices = try c.decodeIfPresent([Int].self, forKey: .fixedIndices) ?? fixedIndices
     }
 }
 

@@ -1,73 +1,73 @@
+import AppKit
 import SwiftUI
 
 // MARK: - Showing Lesson Text
 
-/// Scrolling lesson viewport. Completed text fills left, future text fills
-/// right, and the active character stays centered with a blue-outlined
-/// highlight — the SwiftUI counterpart of `render_text()` in `main.py`.
+/// Pinned lesson strip, ported from `lesson_text_pinned` in the Rust
+/// version. Completed text sits left, upcoming text right, and the active
+/// character is held in the exact middle of the viewport. On every
+/// character switch the strip glides there (~0.12s ease-out) and the active
+/// cell pops (1.18x → 1.0 over ~0.14s), so each keystroke stays visible
+/// even at speed.
 struct LessonTextView: View {
-    @Environment(\.colorScheme) private var scheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var text: String
     var states: [Int: CharState]
     var activeIndex: Int
 
     var body: some View {
-        // Convert once: `characters` used to be a computed property, so every
-        // `characters[offset]` inside the cell loop reconverted the whole
-        // string (~240 full conversions per keystroke on long lessons).
+        // Convert once: indexing a String per cell would reconvert it for
+        // every one of the ~240 visible cells on each keystroke.
         let chars = Array(text)
         let offsets = Self.visibleOffsets(count: chars.count, active: activeIndex)
+        let cell = Self.cellWidth
+        let hasActive = activeIndex < chars.count
+        let activeWidth = hasActive ? cell + CharacterCell.activePadding * 2 : 0
+        // Every cell is exactly `cell` wide (the active one adds padding),
+        // so positions are pure arithmetic in lesson-absolute coordinates:
+        // the strip keeps moving on every keystroke, even after the cell
+        // window starts sliding along a long lesson.
+        let anchor = CGFloat(min(activeIndex, chars.count)) * cell + activeWidth / 2
+        let lead = CGFloat(offsets.first ?? 0) * cell
         return GeometryReader { proxy in
-            ScrollViewReader { scroll in
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 0) {
-                        // Leading spacer keeps the first char centered.
-                        Color.clear.frame(width: max(0, proxy.size.width * 0.48 - 40))
-                        HStack(spacing: 0) {
-                            // Window the cells: a 2394-char lesson rendered as
-                            // 2394 Text views blocks the main thread (beachball
-                            // on launch, Start unclickable). Render ~240 cells
-                            // around the cursor like render_text() does.
-                            ForEach(offsets, id: \.self) { offset in
-                                CharacterCell(
-                                    char: chars[offset],
-                                    state: states[offset],
-                                    isActive: offset == activeIndex && activeIndex < chars.count
-                                )
-                                .equatable()
-                                .id(offset)
-                            }
-                        }
-                        Color.clear.frame(width: max(0, proxy.size.width * 0.5))
-                    }
-                    .frame(minHeight: proxy.size.height)
-                }
-                .onChange(of: activeIndex) { old, next in
-                    let target = min(next, max(0, chars.count - 1))
-                    // Single-step typing advances need no animation: a fresh
-                    // 0.12s easeOut on every keystroke piles overlapping
-                    // animations onto weak GPUs so the text trails the keys.
-                    // Animate only real jumps (restart, lesson switch).
-                    if reduceMotion || abs(next - old) <= 8 {
-                        scroll.scrollTo(target, anchor: .center)
-                    } else {
-                        withAnimation(.easeOut(duration: 0.12)) {
-                            scroll.scrollTo(target, anchor: .center)
-                        }
-                    }
-                }
-                .onAppear {
-                    scroll.scrollTo(min(activeIndex, max(0, chars.count - 1)), anchor: .center)
+            HStack(spacing: 0) {
+                Color.clear.frame(width: lead, height: 1)
+                ForEach(offsets, id: \.self) { offset in
+                    CharacterCell(
+                        char: chars[offset],
+                        state: states[offset],
+                        isActive: offset == activeIndex,
+                        width: cell
+                    )
+                    .equatable()
                 }
             }
+            .fixedSize()
+            .offset(x: proxy.size.width / 2 - anchor)
+            .frame(width: proxy.size.width, height: proxy.size.height, alignment: .leading)
+            .animation(reduceMotion ? nil : Self.glide, value: activeIndex)
         }
+        .clipped()
         // VoiceOver reads the lesson as one adjustable value instead of
         // reconstructing meaning from individual cells.
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text("Lesson text"))
         .accessibilityValue(Text(accessibilityProgress(count: chars.count)))
     }
+
+    // MARK: - Private
+
+    /// Cubic ease-out over 0.12s, the curve the Rust port uses.
+    private static let glide = Animation.timingCurve(0.33, 1, 0.68, 1, duration: 0.12)
+
+    static let fontSize: CGFloat = 44
+
+    /// Advance of one glyph in the lesson font (monospaced, so every
+    /// character shares it).
+    static let cellWidth: CGFloat = {
+        let font = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .medium)
+        return ceil(("M" as NSString).size(withAttributes: [.font: font]).width)
+    }()
 
     /// Visible window around the cursor. Keeps ~80 finished chars on the
     /// left and ~160 upcoming chars on the right so long lessons stay at
@@ -107,30 +107,39 @@ private struct CharacterCell: View, Equatable {
     var char: Character
     var state: CharState?
     var isActive: Bool
+    var width: CGFloat
+
+    static let activePadding: CGFloat = 7
 
     // Manual implementation: the @Environment member must not participate.
     // Unchanged cells then skip re-render on every keystroke (paired with
     // `.equatable()` above — only the two flipped cells rebuild).
     nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
-        lhs.char == rhs.char && lhs.state == rhs.state && lhs.isActive == rhs.isActive
+        lhs.char == rhs.char && lhs.state == rhs.state && lhs.isActive == rhs.isActive && lhs.width == rhs.width
     }
 
     var body: some View {
+        // The active branch is a separate view, so it is created fresh on
+        // each switch and its pop starts from the top. `.identity` keeps the
+        // glide's transaction from cross-fading the two branches.
+        if isActive {
+            ActiveCell(glyph: glyph, width: width)
+                .transition(.identity)
+        } else {
+            glyph
+                .frame(width: width)
+                .transition(.identity)
+        }
+    }
+
+    private var glyph: some View {
         Text(displayed)
-            .font(.system(size: 44, weight: .medium, design: .monospaced))
+            .font(.system(size: LessonTextView.fontSize, weight: .medium, design: .monospaced))
             .foregroundStyle(color)
-            .padding(.horizontal, 7)
-            .padding(.vertical, 4)
-            .background {
-                if isActive {
-                    RoundedRectangle(cornerRadius: 10)
-                        .fill(Theme.panel2(scheme))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 10)
-                                .stroke(Theme.brand(scheme), lineWidth: 1.5)
-                        )
-                }
-            }
+            .lineLimit(1)
+            // Wider fallback glyphs overflow their cell instead of being
+            // truncated or shifting the rest of the strip.
+            .fixedSize()
     }
 
     private var displayed: String {
@@ -147,5 +156,34 @@ private struct CharacterCell: View, Equatable {
         case .errorTimeout: return Theme.errorTimeout(scheme)
         case nil: return Theme.pending(scheme)
         }
+    }
+}
+
+/// Highlighted current character with the switch pop.
+private struct ActiveCell<Glyph: View>: View {
+    @Environment(\.colorScheme) private var scheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    var glyph: Glyph
+    var width: CGFloat
+    @State private var scale: CGFloat = 1.18
+
+    var body: some View {
+        glyph
+            .frame(width: width)
+            .padding(.horizontal, CharacterCell.activePadding)
+            .padding(.vertical, 4)
+            .background {
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(Theme.panel2(scheme))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10)
+                            .stroke(Theme.brand(scheme), lineWidth: 1.5)
+                    )
+            }
+            .scaleEffect(reduceMotion ? 1 : scale)
+            .onAppear {
+                // Quadratic ease-out, matching the Rust pop curve.
+                withAnimation(.timingCurve(0.5, 1, 0.89, 1, duration: 0.14)) { scale = 1 }
+            }
     }
 }

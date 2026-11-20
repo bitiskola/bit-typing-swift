@@ -83,8 +83,8 @@ cp -R "$BUNDLE_SRC" "$APP/Contents/Resources/"
 # locates the Resources copy on its own.
 
 BUNDLE_DEST="$APP/Contents/Resources/BITTyping_BITTyping.bundle"
-if [[ ! -d "$BUNDLE_DEST/courses" && ! -d "$BUNDLE_DEST/Contents/Resources/courses" ]]; then
-    echo "Error: resource bundle copy failed — courses/ missing in $APP/Contents/Resources/." >&2
+if [[ ! -d "$BUNDLE_DEST/default-repo" && ! -d "$BUNDLE_DEST/Contents/Resources/default-repo" ]]; then
+    echo "Error: resource bundle copy failed — default-repo/ missing in $APP/Contents/Resources/." >&2
     exit 1
 fi
 

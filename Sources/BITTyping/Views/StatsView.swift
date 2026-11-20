@@ -27,14 +27,31 @@ struct StatsView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             Table(historyRows, selection: $state.selectedHistoryID) {
                 TableColumn(state.t("date"), value: \.dateString)
-                TableColumn(state.t("lesson"), value: \.lesson)
+                TableColumn(state.t("lesson")) { row in
+                    // Unfinished rows are marked so they invite continuing.
+                    if row.attempt.unfinished {
+                        Label {
+                            Text("\(row.lesson) (\(state.t("unfinished")))")
+                        } icon: {
+                            Image(systemName: "pause.circle")
+                                .foregroundStyle(Theme.brand(scheme))
+                        }
+                        .help(state.t("results_unfinished_note"))
+                    } else {
+                        Text(row.lesson)
+                    }
+                }
                 TableColumn(state.t(speedUnit.unitKey)) { row in Text(row.speedString) }
                 TableColumn(state.t("accuracy")) { row in Text(row.accuracyString) }
                 TableColumn(state.t("done")) { row in Text(row.doneString) }
                 TableColumn(state.t("errors")) { row in Text("\(row.attempt.errors)") }
             }
             .onDoubleClick {
-                openSelected()
+                if selectedAttempt?.unfinished == true {
+                    continueSelected()
+                } else {
+                    openSelected()
+                }
             }
         }
         .padding(20)
@@ -46,6 +63,13 @@ struct StatsView: View {
                 }
                 .pickerStyle(.segmented)
                 .frame(width: 200)
+            }
+            ToolbarItem(placement: .primaryAction) {
+                Button(action: continueSelected) {
+                    Label(state.t("continue_lesson"), systemImage: "play.fill")
+                }
+                .disabled(selectedAttempt?.unfinished != true)
+                .help(state.t("finish_early_tip"))
             }
             ToolbarItem(placement: .primaryAction) {
                 Button(action: openSelected) {
@@ -61,7 +85,7 @@ struct StatsView: View {
             }
         }
         .background(
-            ToolbarPrioritySetter(priorities: [.standard, .user, .low])
+            ToolbarPrioritySetter(priorities: [.standard, .user, .user, .low])
                 .frame(width: 0, height: 0)
         )
         .confirmationDialog(
@@ -92,11 +116,20 @@ struct StatsView: View {
         }
     }
 
+    private var selectedAttempt: Attempt? {
+        guard let id = state.selectedHistoryID else { return nil }
+        return state.history.first { $0.id == id }
+    }
+
+    /// Double-click: unfinished rows continue typing, others open results.
     private func openSelected() {
-        guard let id = state.selectedHistoryID,
-            let attempt = state.history.first(where: { $0.id == id })
-        else { return }
+        guard let attempt = selectedAttempt else { return }
         state.resultsAttempt = attempt
+    }
+
+    private func continueSelected() {
+        guard let attempt = selectedAttempt, attempt.unfinished else { return }
+        state.continueAttempt(attempt.id)
     }
 }
 

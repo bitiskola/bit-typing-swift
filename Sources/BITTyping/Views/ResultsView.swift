@@ -68,8 +68,16 @@ struct ResultsView: View {
 
     private var header: some View {
         HStack {
-            Text(state.t("lesson_results"))
-                .font(.system(size: 24, weight: .bold))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(attempt.unfinished ? "\(state.t("lesson_results")) (\(state.t("unfinished")))" : state.t("lesson_results"))
+                    .font(.system(size: 24, weight: .bold))
+                if attempt.unfinished {
+                    Text(state.t("results_unfinished_note"))
+                        .font(.system(size: 13))
+                        .foregroundStyle(Theme.muted(scheme))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
             Spacer()
             Text(String(format: "%.0f%%", score))
                 .font(.system(size: 20, weight: .bold))
@@ -232,10 +240,18 @@ struct ResultsView: View {
                 Label(state.t("return_home"), systemImage: "keyboard")
             }
             .buttonStyle(.appSecondary)
-            if let next = state.nextLessonURL(for: attempt) {
+            if attempt.unfinished, state.history.contains(where: { $0.id == attempt.id && $0.unfinished }) {
+                Button {
+                    state.continueAttempt(attempt.id)
+                } label: {
+                    Label(state.t("continue_lesson"), systemImage: "play.fill")
+                }
+                .buttonStyle(.appBrand)
+            }
+            if let next = state.nextCourse(for: attempt) {
                 Button {
                     state.resultsAttempt = nil
-                    state.openLesson(url: next)
+                    state.openCourse(next)
                 } label: {
                     Label(state.t("next_lesson"), systemImage: "arrow.right")
                 }

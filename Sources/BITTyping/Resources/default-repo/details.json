@@ -1,0 +1,38 @@
+{
+  "name": "BIT Typing main Courses",
+  "creator": "bitiskola",
+  "courses": {
+    "HU-qwertz": [
+      "HU-qwertz/01.txt",
+      "HU-qwertz/02.txt",
+      "HU-qwertz/03.txt",
+      "HU-qwertz/04.txt",
+      "HU-qwertz/05.txt",
+      "HU-qwertz/06.txt",
+      "HU-qwertz/07.txt",
+      "HU-qwertz/08.txt",
+      "HU-qwertz/09.txt",
+      "HU-qwertz/10.txt",
+      "HU-qwertz/1000karakter.txt",
+      "HU-qwertz/11.txt",
+      "HU-qwertz/12.txt",
+      "HU-qwertz/13.txt",
+      "HU-qwertz/14.txt",
+      "HU-qwertz/15.txt",
+      "HU-qwertz/16.txt",
+      "HU-qwertz/17.txt",
+      "HU-qwertz/18t.txt",
+      "HU-qwertz/18t_gyak.txt",
+      "HU-qwertz/19.txt",
+      "HU-qwertz/20.txt",
+      "HU-qwertz/2000 karakter.txt",
+      "HU-qwertz/21.txt",
+      "HU-qwertz/22.txt",
+      "HU-qwertz/23.txt",
+      "HU-qwertz/24.txt",
+      "HU-qwertz/25.txt",
+      "HU-qwertz/26.txt",
+      "HU-qwertz/szövegek másoláshoz.txt"
+    ]
+  }
+}

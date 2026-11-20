@@ -26,10 +26,18 @@ final class AppState {
     var languages: [String: LanguagePack] = [:]
     var keyboardLayouts: [String: KeyboardLayout] = [:]
 
-    var courseNames: [String] = []
-    var selectedLesson: String = ""
-    var lastLessonName: String = ""
+    /// Configured course pack URLs (default pack always first/present).
+    var courseRepos: [String] = []
+    /// Local lessons plus pack lessons matching the keyboard layout.
+    var availableCourses: [AvailableCourse] = []
+    var selectedCourseID: String = ""
+    var lastCourseID: String = ""
     var session = Session()
+    /// History row being continued; finishing updates it in place.
+    var continuingFromID: UUID? = nil
+    var repoSummaries: [RepoSummary] = []
+    var repoStatus: String = ""
+    var refreshingRepos = false
 
     var liveWpm: Double = 0
     var liveAccuracy: Double = 100
@@ -62,7 +70,7 @@ final class AppState {
     private var lastMetronomeSecond: Int = -1
     private var wellDoneTask: Task<Void, Never>? = nil
 
-    init() {
+    init(autoRefreshRepos: Bool = true) {
         AppSupport.ensureSeeded()
         settings = AppSupport.readJSON(AppSupport.settingsFile, as: AppSettings.self, default: AppSettings())
         history = AppSupport.readJSON(AppSupport.historyFile, as: [Attempt].self, default: [])
@@ -73,12 +81,17 @@ final class AppState {
         {
             speedUnit = unit
         }
+        courseRepos = CourseRepos.loadURLs()
         loadResources()
-        reloadCourses(select: nil)
+        refreshAvailable()
+        prepareLesson()
         showingSetup = !settings.setupComplete
         timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.tick() }
         }
+        // Lessons from the local checkouts are usable immediately; packs
+        // are pulled in the background and merged in when done.
+        if autoRefreshRepos { refreshRepos() }
     }
 
     // MARK: - Localizing Strings
@@ -153,6 +166,32 @@ final class AppState {
         AppSupport.writeJSON(settings, to: AppSupport.settingsFile)
     }
 
+    /// Apply edited settings (Options / Setup) without restarting the
+    /// lesson: the course list is only rebuilt when the keyboard layout
+    /// changed, and the live session survives unless its course vanished.
+    func applySettings(_ updated: AppSettings) {
+        let oldLayout = settings.keyboardLayout
+        let oldLanguage = settings.language
+        settings = updated
+        saveSettings()
+        loadResources()
+        if settings.keyboardLayout != oldLayout {
+            courseListChanged()
+        } else if session.characters.isEmpty, settings.language != oldLanguage {
+            // Only the localized "no lesson" placeholder needs refreshing.
+            prepareLesson()
+        }
+    }
+
+    /// Opening Options/About must never silently keep the clock running.
+    func pauseForModal() {
+        guard session.running, !session.paused else { return }
+        session.paused = true
+        session.pausedAt = Date()
+        startButtonKey = "resume"
+        tipKey = "paused_tip"
+    }
+
     func setSpeedUnit(_ unit: SpeedUnit) {
         speedUnit = unit
         UserDefaults.standard.set(unit.rawValue, forKey: "bittyping.speedUnit")
@@ -160,36 +199,70 @@ final class AppState {
 
     // MARK: - Managing Lessons
 
-    func reloadCourses(select: String?) {
-        let files = (try? FileManager.default.contentsOfDirectory(at: AppSupport.courses, includingPropertiesForKeys: nil)) ?? []
-        courseNames = files
-            .filter { $0.pathExtension == "txt" }
-            .map { $0.deletingPathExtension().lastPathComponent }
-            .sorted { $0.caseInsensitiveCompare($1) == .orderedAscending }
-        if let select, courseNames.contains(select) {
-            selectedLesson = select
-        } else if !courseNames.contains(selectedLesson) {
-            selectedLesson = courseNames.first ?? ""
+    var currentCourse: AvailableCourse? {
+        availableCourses.first { $0.id == selectedCourseID }
+    }
+
+    /// Title for the window: the live session's lesson (which may be an
+    /// orphaned continuation) or the picker selection.
+    var lessonTitle: String {
+        session.lesson.isEmpty ? (currentCourse?.title ?? "") : session.lesson
+    }
+
+    /// Rebuild the layout-filtered course list. Keeps the selection when it
+    /// still exists. Returns true when the selection changed.
+    @discardableResult
+    func refreshAvailable(select: String? = nil) -> Bool {
+        let previous = selectedCourseID
+        availableCourses = CourseRepos.collectAvailable(
+            urls: courseRepos, layout: settings.keyboardLayout, custom: customCourses)
+        if let select {
+            if availableCourses.contains(where: { $0.id == select }) {
+                selectedCourseID = select
+            } else if let match = availableCourses.first(where: { $0.title == select }) {
+                selectedCourseID = match.id
+            }
         }
+        if !availableCourses.contains(where: { $0.id == selectedCourseID }) {
+            selectedCourseID = availableCourses.first?.id ?? ""
+        }
+        repoSummaries = courseRepos.map { RepoSummary(url: $0, layout: settings.keyboardLayout) }
+        return selectedCourseID != previous
+    }
+
+    /// The course list changed underneath (packs, layout): restart only
+    /// when the selected lesson is gone or nothing is in progress, so an
+    /// in-progress run is never wiped.
+    private func courseListChanged() {
+        let selectionChanged = refreshAvailable()
+        if selectionChanged || (!session.running && continuingFromID == nil) {
+            prepareLesson()
+        }
+    }
+
+    func selectCourse(_ id: String) {
+        guard id != selectedCourseID || !session.running else { return }
+        selectedCourseID = id
         prepareLesson()
     }
 
     func currentURL() -> URL? {
-        guard !selectedLesson.isEmpty else { return nil }
-        let url = AppSupport.courses.appendingPathComponent(selectedLesson + ".txt")
-        return FileManager.default.fileExists(atPath: url.path) ? url : nil
+        guard let url = currentCourse?.url, FileManager.default.fileExists(atPath: url.path) else { return nil }
+        return url
     }
 
     /// Reset state for the selected lesson without starting the clock.
     func prepareLesson() {
-        if let url = currentURL() {
+        // A fresh start always records a new history row.
+        continuingFromID = nil
+        if let course = currentCourse, let url = currentURL() {
             do {
                 // Editors commonly leave one terminal newline; it must not
                 // require an invisible final Enter press to finish.
                 let raw = try CourseText.read(url)
                 let text = raw.replacingOccurrences(of: "[\\r\\n]+$", with: "", options: .regularExpression)
-                session = Session(lesson: selectedLesson, text: text, characters: Array(text))
-                lastLessonName = selectedLesson
+                session = Session(lesson: course.title, text: text, characters: Array(text))
+                lastCourseID = course.id
             } catch {
                 loadError = t("lesson_load_failed_body", args: ["name": url.lastPathComponent, "error": error.localizedDescription])
                 session = Session()
@@ -202,8 +275,20 @@ final class AppState {
         updateLive()
     }
 
+    /// Typing can (re)start: there is text left and the session is either
+    /// live or not started yet (a finished run must be re-prepared first).
+    var canStartLesson: Bool {
+        !session.characters.isEmpty && session.index < session.characters.count
+            && (session.running || session.startedAt == nil)
+    }
+
+    /// "Finish early" is offered once something was typed and text remains.
+    var canFinishEarly: Bool {
+        session.running && session.index > 0 && session.index < session.characters.count
+    }
+
     func toggleStart() {
-        guard currentURL() != nil else { return }
+        guard canStartLesson else { return }
         if !session.running {
             startSession()
         } else if session.paused {
@@ -227,7 +312,10 @@ final class AppState {
         let now = Date()
         session.startedAt = now
         session.lastKeyAt = now
-        session.startedWall = isoNow()
+        // A continuation keeps the original start time of the row.
+        if continuingFromID == nil || session.startedWall.isEmpty {
+            session.startedWall = isoNow()
+        }
         session.running = true
         session.paused = false
         startButtonKey = "pause"
@@ -260,8 +348,7 @@ final class AppState {
             if !session.running {
                 guard allowAutoStart,
                     settings.autoStart,
-                    currentURL() != nil,
-                    session.index < session.characters.count,
+                    canStartLesson,
                     actual == "\t" || actual.first?.isNewline == true || actual.first?.isPrintableASCIIOrBeyond == true
                 else { return false }
                 startSession()
@@ -370,7 +457,14 @@ final class AppState {
 
     // MARK: - Finishing Lessons
 
-    func finishSession() {
+    /// Stop before the last character: saves an `unfinished` row that can
+    /// be continued later from Statistics (even after relaunching).
+    func finishEarly() {
+        guard canFinishEarly else { return }
+        finishSession(early: true)
+    }
+
+    func finishSession(early: Bool = false) {
         guard session.running else { return }
         session.running = false
         let duration = max(0.01, session.elapsed())
@@ -388,18 +482,38 @@ final class AppState {
             else { resultStates[String(index)] = .error }
         }
         let fixedWords = Set(session.fixedIndices.compactMap { Self.word(at: $0, in: session.text) }.filter { !$0.isEmpty }).count
-        let fileName = currentURL()?.lastPathComponent ?? ""
-        let attempt = Attempt(
+
+        // A continuation keeps its stored identifiers, so an attempt whose
+        // pack was removed meanwhile can still be finished consistently.
+        let continued = continuingFromID.flatMap { id in history.first { $0.id == id } }
+        var courseFile = ""
+        var custom = false
+        var courseID = ""
+        if let continued {
+            courseFile = continued.courseFile
+            custom = continued.customCourse
+            courseID = continued.courseID
+            if let live = availableCourses.first(where: { $0.id == continued.courseID }) {
+                courseFile = live.courseFile
+                custom = live.custom
+            }
+        } else if let course = currentCourse {
+            courseFile = course.courseFile
+            custom = course.custom
+            courseID = course.id
+        }
+        let done = session.text.isEmpty ? 0 : Double(session.index) / Double(session.characters.count) * 100
+        var attempt = Attempt(
             lesson: session.lesson,
             startedAt: session.startedWall,
-            courseFile: fileName,
-            customCourse: customCourses.contains(fileName),
+            courseFile: courseFile,
+            customCourse: custom,
             finishedAt: isoNow(),
             duration: duration,
             wpm: wpm,
             accuracy: accuracy,
             slowdown: slowdown,
-            done: session.text.isEmpty ? 0 : Double(session.index) / Double(session.characters.count) * 100,
+            done: done,
             words: session.text.prefix(sessionTextPrefixLength()).split(whereSeparator: \.isWhitespace).count,
             fixedWords: fixedWords,
             characters: session.index,
@@ -410,9 +524,18 @@ final class AppState {
             passed: wpm >= settings.goalWpm && accuracy >= settings.goalAccuracy,
             text: session.text,
             states: resultStates,
-            strokes: session.strokes
+            strokes: session.strokes,
+            unfinished: early && done < 99.9 && !session.text.isEmpty,
+            courseID: courseID,
+            fixedIndices: session.fixedIndices.sorted()
         )
-        history.append(attempt)
+        if let continued, let index = history.firstIndex(where: { $0.id == continued.id }) {
+            attempt.id = continued.id
+            history[index] = attempt
+        } else {
+            history.append(attempt)
+        }
+        continuingFromID = nil
         AppSupport.writeJSON(history, to: AppSupport.historyFile)
         startButtonKey = "start_lesson"
         updateLive()
@@ -426,43 +549,83 @@ final class AppState {
         }
     }
 
+    /// Results closed without choosing an action: a finished run can't be
+    /// typed into any more, so set the lesson up fresh.
+    func resultsDismissed() {
+        if !session.running, session.startedAt != nil {
+            prepareLesson()
+        }
+    }
+
     private func sessionTextPrefixLength() -> Int {
         session.text.prefix(session.index).count
     }
 
-    // MARK: - Navigating Between Lessons
+    // MARK: - Continuing Unfinished Attempts
 
-    /// Next numbered built-in lesson, or nil for custom/final lessons.
-    func nextLessonURL(for attempt: Attempt) -> URL? {
-        let files = (try? FileManager.default.contentsOfDirectory(at: AppSupport.courses, includingPropertiesForKeys: nil)) ?? []
-        let byName = Dictionary(uniqueKeysWithValues: files.map { ($0.lastPathComponent, $0) })
-        var current = byName[attempt.courseFile]
-        if current == nil {
-            current = files.first { $0.deletingPathExtension().lastPathComponent == attempt.lesson }
+    /// Rebuild a session from an unfinished row so the rest can be typed.
+    /// The clock resumes from the stored duration on the first keystroke
+    /// (or Start), and finishing updates the same history row.
+    func continueAttempt(_ id: UUID) {
+        guard let attempt = history.first(where: { $0.id == id }), attempt.unfinished, !attempt.text.isEmpty else { return }
+        // Prefer the live course; the stored transcript still works when
+        // the pack was removed or renamed.
+        let live = availableCourses.first { $0.id == attempt.courseID }
+            ?? availableCourses.first { $0.courseFile == attempt.courseFile && $0.title == attempt.lesson }
+        if let live {
+            selectedCourseID = live.id
+            lastCourseID = live.id
         }
-        guard let current,
-            !customCourses.contains(current.lastPathComponent),
-            !attempt.customCourse,
-            let currentNumber = Self.leadingNumber(current.deletingPathExtension().lastPathComponent)
-        else { return nil }
-        let candidates = files.compactMap { url -> (Int, URL)? in
-            if url == current || customCourses.contains(url.lastPathComponent) { return nil }
-            guard let n = Self.leadingNumber(url.deletingPathExtension().lastPathComponent), n > currentNumber else { return nil }
-            return (n, url)
+        let characters = Array(attempt.text)
+        var restored = Session(lesson: attempt.lesson, text: attempt.text, characters: characters)
+        restored.index = min(attempt.characters, characters.count)
+        for (key, state) in attempt.states {
+            if let index = Int(key) { restored.states[index] = state }
         }
-        .sorted { $0.0 == $1.0 ? $0.1.lastPathComponent.caseInsensitiveCompare($1.1.lastPathComponent) == .orderedAscending : $0.0 < $1.0 }
-        return candidates.first?.1
+        restored.strokes = attempt.strokes
+        restored.errors = attempt.errors
+        restored.timeouts = attempt.timeouts
+        restored.backspaces = attempt.backspaces
+        let normal = attempt.strokes.filter { !$0.systemKey }
+        restored.typedKeys = normal.count
+        restored.correctKeys = normal.filter(\.correct).count
+        restored.fixedIndices = Set(attempt.fixedIndices)
+        restored.startedWall = attempt.startedAt
+        restored.resumedElapsed = max(0, attempt.duration)
+        session = restored
+        continuingFromID = id
+        resultsAttempt = nil
+        selectedHistoryID = nil
+        selectedTab = .lesson
+        startButtonKey = "resume"
+        tipKey = "ready_tip"
+        updateLive()
     }
 
-    func openLesson(url: URL) {
-        let stem = url.deletingPathExtension().lastPathComponent
-        if courseNames.contains(stem) { selectedLesson = stem }
+    // MARK: - Navigating Between Lessons
+
+    /// Next numbered lesson in the same pack and layout. Unfinished runs
+    /// never offer one: the lesson should be continued first.
+    func nextCourse(for attempt: Attempt) -> AvailableCourse? {
+        guard !attempt.unfinished else { return nil }
+        var id = attempt.courseID
+        if id.isEmpty || !availableCourses.contains(where: { $0.id == id }) {
+            // Older rows only stored the file name.
+            id = availableCourses.first { $0.courseFile == attempt.courseFile && $0.title == attempt.lesson }?.id
+                ?? availableCourses.first { !$0.custom && $0.title == attempt.lesson }?.id
+                ?? ""
+        }
+        return CourseRepos.nextCourse(in: availableCourses, after: id)
+    }
+
+    func openCourse(_ course: AvailableCourse) {
+        selectedCourseID = course.id
         selectedTab = .lesson
         prepareLesson()
     }
 
     func returnToLesson() {
-        if courseNames.contains(lastLessonName) { selectedLesson = lastLessonName }
+        if availableCourses.contains(where: { $0.id == lastCourseID }) { selectedCourseID = lastCourseID }
         selectedTab = .lesson
         prepareLesson()
     }
@@ -508,7 +671,7 @@ final class AppState {
         }
         if let last {
             AppSupport.writeJSON(Array(customCourses).sorted(), to: AppSupport.customCoursesFile)
-            reloadCourses(select: last)
+            localLessonChanged("local:\(last)")
         }
     }
 
@@ -540,7 +703,7 @@ final class AppState {
         }
         let path = AppSupport.courses.appendingPathComponent(safe + ".txt")
         if FileManager.default.fileExists(atPath: path.path),
-            path.deletingPathExtension().lastPathComponent != selectedLesson,
+            selectedCourseID != "local:\(safe)",
             confirmReplace, !alreadyConfirmed
         {
             return false
@@ -552,14 +715,100 @@ final class AppState {
             noticeMessage = error.localizedDescription
             return false
         }
-        if !AppSupport.builtinCourseFiles.contains(path.lastPathComponent) {
-            customCourses.insert(path.lastPathComponent)
-            AppSupport.writeJSON(Array(customCourses).sorted(), to: AppSupport.customCoursesFile)
-        }
-        reloadCourses(select: safe)
+        customCourses.insert(path.lastPathComponent)
+        AppSupport.writeJSON(Array(customCourses).sorted(), to: AppSupport.customCoursesFile)
+        localLessonChanged("local:\(safe)")
         noticeTitleKey = "lesson_saved_title"
         noticeMessage = t("lesson_saved_body", args: ["name": path.lastPathComponent])
         return true
+    }
+
+    /// Select a just-written local lesson. Its new text is loaded unless a
+    /// different lesson is mid-run.
+    private func localLessonChanged(_ id: String) {
+        let previous = selectedCourseID
+        refreshAvailable(select: id)
+        if selectedCourseID != previous || !session.running || previous == id {
+            prepareLesson()
+        }
+    }
+
+    // MARK: - Managing Course Packs
+
+    /// Clone/pull every pack in the background, then merge the result into
+    /// the course list without disturbing an in-progress lesson.
+    func refreshRepos() {
+        guard !refreshingRepos else { return }
+        refreshingRepos = true
+        let urls = courseRepos
+        Task {
+            let results = await Task.detached { await CourseRepos.refreshAll(urls) }.value
+            refreshingRepos = false
+            courseListChanged()
+            var ok = 0
+            var firstError: String? = nil
+            for (_, result) in results {
+                switch result {
+                case .success: ok += 1
+                case .failure(let error): if firstError == nil { firstError = error.message }
+                }
+            }
+            if let firstError {
+                repoStatus = "\(t("repo_refresh_partial")): \(firstError)"
+            } else {
+                repoStatus = t("repo_refreshed", args: ["count": "\(ok)"])
+            }
+        }
+    }
+
+    /// Clone a new pack; it is only added to the list when the fetch worked.
+    /// Returns true on success.
+    func addRepo(_ raw: String) async -> Bool {
+        let url = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !url.isEmpty else {
+            repoStatus = t("repo_empty_url")
+            return false
+        }
+        let normalized = CourseRepos.normalize(url).lowercased()
+        guard !courseRepos.contains(where: { CourseRepos.normalize($0).lowercased() == normalized }) else {
+            repoStatus = t("repo_already_added")
+            return false
+        }
+        let slug = CourseRepos.slug(for: url)
+        // Packs are stored by folder name; two URLs ending in the same name
+        // would overwrite each other's checkout.
+        guard !courseRepos.contains(where: { CourseRepos.slug(for: $0) == slug }) else {
+            repoStatus = "\(t("repo_add_failed")): \(slug)"
+            return false
+        }
+        guard !refreshingRepos else { return false }
+        refreshingRepos = true
+        let result = await Task.detached { await CourseRepos.refresh(url: url) }.value
+        refreshingRepos = false
+        switch result {
+        case .success(let details):
+            courseRepos.append(url)
+            CourseRepos.saveURLs(courseRepos)
+            courseListChanged()
+            repoStatus = t("repo_added", args: ["name": details.name.isEmpty ? url : details.name])
+            return true
+        case .failure(let error):
+            repoStatus = "\(t("repo_add_failed")): \(error.message)"
+            return false
+        }
+    }
+
+    func removeRepo(_ url: String) {
+        guard !CourseRepos.isDefault(url) else {
+            repoStatus = t("repo_default_locked")
+            return
+        }
+        courseRepos.removeAll { $0 == url }
+        // Drop the checkout so its lessons leave the picker.
+        try? FileManager.default.removeItem(at: CourseRepos.directory(for: url))
+        CourseRepos.saveURLs(courseRepos)
+        courseListChanged()
+        repoStatus = t("repo_removed", args: ["name": url])
     }
 
     // MARK: - Scoring Results
@@ -581,11 +830,6 @@ final class AppState {
         return formatter.string(from: Date())
     }
 
-    private static func leadingNumber(_ stem: String) -> Int? {
-        let prefix = stem.prefix(while: \.isNumber)
-        return Int(prefix)
-    }
-
     private static func word(at index: Int, in text: String) -> String? {
         guard !text.isEmpty else { return nil }
         let chars = Array(text)
@@ -604,6 +848,40 @@ enum AppTab: String, Hashable, Sendable, CaseIterable {
     case lesson
     case stats
     case editor
+    case repos
+}
+
+// MARK: - Summarizing Course Packs
+
+/// One row of the course pack page.
+struct RepoSummary: Identifiable, Sendable {
+    var url: String
+    var slug: String
+    var name: String
+    var creator: String
+    var isDefault: Bool
+    /// The checkout exists locally.
+    var downloaded: Bool
+    /// Lessons for the active keyboard layout / in total.
+    var matchingCount: Int
+    var totalCount: Int
+
+    var id: String { url }
+
+    init(url: String, layout: String) {
+        self.url = url
+        slug = CourseRepos.slug(for: url)
+        isDefault = CourseRepos.isDefault(url)
+        let directory = CourseRepos.directory(for: url)
+        downloaded = FileManager.default.fileExists(atPath: directory.path)
+        let details = downloaded ? CourseRepos.details(in: directory, slug: slug) : RepoDetails()
+        name = details.name.isEmpty ? slug : details.name
+        creator = details.creator
+        totalCount = details.courses.count
+        matchingCount = details.courses.filter {
+            $0.layout == "*" || $0.layout.caseInsensitiveCompare(layout) == .orderedSame
+        }.count
+    }
 }
 
 // MARK: - Character Helpers

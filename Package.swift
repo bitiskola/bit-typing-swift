@@ -13,7 +13,7 @@ let package = Package(
         .executableTarget(
             name: "BITTyping",
             resources: [
-                .copy("Resources/courses"),
+                .copy("Resources/default-repo"),
                 .copy("Resources/lang"),
                 .copy("Resources/keyboards"),
                 .copy("Resources/sounds"),

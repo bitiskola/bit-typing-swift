@@ -58,7 +58,7 @@ struct LessonView: View {
                 ToolbarPrioritySetter(priorities: [.high, .user, .standard, .low, .low])
                     .frame(width: 0, height: 0)
             )
-            .navigationTitle(state.selectedLesson.isEmpty ? state.t("current_lesson") : state.selectedLesson)
+            .navigationTitle(state.lessonTitle.isEmpty ? state.t("current_lesson") : state.lessonTitle)
     }
 
     // MARK: - Private
@@ -66,18 +66,20 @@ struct LessonView: View {
     /// Lesson picker lives in the toolbar; empty state shows inline text.
     private var lessonPicker: some View {
         Group {
-            if state.courseNames.isEmpty {
+            if state.availableCourses.isEmpty {
                 Text(state.t("no_lessons"))
                     .font(.system(size: 13))
                     .foregroundStyle(Theme.muted(scheme))
             } else {
-                Picker("", selection: $state.selectedLesson) {
-                    ForEach(state.courseNames, id: \.self) { name in
-                        Text(name).tag(name)
+                // Explicit setter instead of `onChange`: programmatic
+                // selection changes (continuing a run, pack refreshes) must
+                // not restart the lesson behind the user's back.
+                Picker("", selection: Binding(get: { state.selectedCourseID }, set: { state.selectCourse($0) })) {
+                    ForEach(state.availableCourses) { course in
+                        Text(course.display).tag(course.id)
                     }
                 }
-                .frame(minWidth: 180, maxWidth: 260)
-                .onChange(of: state.selectedLesson) { _, _ in state.prepareLesson() }
+                .frame(minWidth: 180, maxWidth: 320)
             }
         }
     }
@@ -88,7 +90,7 @@ struct LessonView: View {
         }
         .buttonStyle(.borderedProminent)
         .tint(Theme.brand(scheme))
-        .disabled(state.currentURL() == nil)
+        .disabled(!state.canStartLesson)
     }
 
     /// Play while idle/paused, pause while running.
@@ -146,8 +148,22 @@ struct LessonView: View {
     }
 
     private var footer: some View {
-        HStack {
+        HStack(spacing: 12) {
+            if state.continuingFromID != nil {
+                Label(state.t("continuing_unfinished"), systemImage: "arrow.uturn.backward")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Theme.muted(scheme))
+                    .lineLimit(1)
+            }
             Spacer()
+            if state.canFinishEarly {
+                Button(action: state.finishEarly) {
+                    Label(state.t("finish_early"), systemImage: "stop.fill")
+                }
+                .buttonStyle(.appSecondary)
+                .controlSize(.small)
+                .help(state.t("finish_early_tip"))
+            }
             Text("\(state.session.index) / \(state.session.characters.count)")
                 .font(.system(size: 13))
                 .foregroundStyle(Theme.muted(scheme))
