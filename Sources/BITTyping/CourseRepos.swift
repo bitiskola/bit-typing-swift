@@ -248,7 +248,10 @@ enum CourseRepos {
     // MARK: - Listing Lessons
 
     /// Every local lesson (all layouts) plus each pack course matching
-    /// `layout`, sorted by title then pack name.
+    /// `layout`, sorted by title then pack name. A pack with nothing for
+    /// `layout` (e.g. the HU-only default pack on US-qwerty) lists all of
+    /// its lessons instead, tagged with their layout, so the picker is
+    /// never empty just because of the keyboard setting.
     static func collectAvailable(urls: [String], layout: String, custom: Set<String>) -> [AvailableCourse] {
         let manager = FileManager.default
         var out: [AvailableCourse] = []
@@ -266,8 +269,11 @@ enum CourseRepos {
             let directory = directory(for: url)
             guard manager.fileExists(atPath: directory.path) else { continue }
             let details = details(in: directory, slug: slug)
-            let repoName = details.name.isEmpty ? slug : details.name
-            for entry in details.courses where layoutMatches(entry.layout, layout) {
+            let packName = details.name.isEmpty ? slug : details.name
+            let matching = details.courses.filter { layoutMatches($0.layout, layout) }
+            let showAllLayouts = matching.isEmpty
+            for entry in showAllLayouts ? details.courses : matching {
+                let repoName = showAllLayouts ? "\(packName) · \(entry.layout)" : packName
                 let file = directory.appendingPathComponent(entry.path)
                 guard manager.fileExists(atPath: file.path) else { continue }
                 let fallback = file.deletingPathExtension().lastPathComponent

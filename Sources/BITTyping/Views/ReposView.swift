@@ -17,10 +17,12 @@ struct ReposView: View {
             Text(state.t("course_repos"))
                 .font(.system(size: 22, weight: .bold))
                 .foregroundStyle(Theme.ink(scheme))
+            // No `.fixedSize(vertical:)` here: inside this full-height
+            // frame it gives the split view an unbounded ideal height and
+            // the whole window (sidebar included) renders blank.
             Text(state.t("course_repos_tip"))
                 .font(.system(size: 13))
                 .foregroundStyle(Theme.muted(scheme))
-                .fixedSize(horizontal: false, vertical: true)
             if !state.repoStatus.isEmpty {
                 Text(state.repoStatus)
                     .font(.system(size: 12))

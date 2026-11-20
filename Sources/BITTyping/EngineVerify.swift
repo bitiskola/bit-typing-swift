@@ -93,6 +93,7 @@ enum EngineVerify {
         check("perfect score is 100", abs(state.overallScore(for: perfect) - 100) < 0.001)
         // Lesson text decoding handles BOM-less and legacy encodings.
         check("default pack seeded", !CourseRepos.collectAvailable(urls: [CourseRepos.defaultURL], layout: "HU-qwertz", custom: []).filter { !$0.repoName.isEmpty }.isEmpty)
+        check("other layouts fall back to all pack lessons", !CourseRepos.collectAvailable(urls: [CourseRepos.defaultURL], layout: "US-qwerty", custom: []).filter { !$0.repoName.isEmpty }.isEmpty)
         check("default pack always configured", state.courseRepos.contains(where: CourseRepos.isDefault))
         resetGuards(state)
 
